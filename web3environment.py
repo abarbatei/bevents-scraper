@@ -34,7 +34,7 @@ class Web3Interface:
 
         self.endpoint = endpoint
 
-        if self.endpoint.startswith("wss"):
+        if self.endpoint.startswith("ws"):
             self.web3 = Web3(Web3.WebsocketProvider(self.endpoint))
         else:
             self.web3 = Web3(Web3.HTTPProvider(self.endpoint))
