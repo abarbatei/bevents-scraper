@@ -4,6 +4,7 @@ import asyncio
 
 from web3environment import Web3Interface, Blockchains
 from utils import get_logger
+from distribution import RabbitPublisher
 
 
 class EventScraper:
@@ -18,6 +19,17 @@ class EventScraper:
         self.targeted_events_data = self.load_events_filter()
         self.logger.info("Loaded contract watchlist")
         self.background_tasks = set()
+
+        config = {
+            "host": os.environ["RABBIT_HOST_URL"],
+            "port": int(os.environ["RABBIT_HOST_PORT"]),
+            "exchange": os.environ["RABBIT_EXCHANGE"],
+            "routing_key": os.environ["RABBIT_ROUTING_KEY"],
+            "user": os.environ["RABBIT_USER"],
+            "password": os.environ["RABBIT_PASSWORD"]
+        }
+
+        self.publisher = RabbitPublisher(config)
 
     @staticmethod
     def load_events_filter():
@@ -81,7 +93,9 @@ class EventScraper:
             "filter_arguments": filter_arguments,
             "event_data": json.loads(self.w3i.web3.toJSON(event))
         }
-        self.logger.info(json.dumps(data, indent=4))
+        self.logger.info("Publishing event {} data to routing key".format(event_name))
+        self.publisher.publish(json.dumps(data))
+        self.logger.info("Done publishing event {} data to routing key".format(event_name))
 
 
 def main():
