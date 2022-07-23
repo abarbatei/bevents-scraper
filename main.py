@@ -60,6 +60,8 @@ class EventScraper:
                 # this is a hack and the use of eval in general code should be discouraged
                 # this also brings a very bad security risk if the passed argument can be controlled by a 3rd party
                 # in this case it is not, it is composed of the content in contract-watchlist.json which we control
+                # TODO: there is actually a better way using web3.eth.filter:
+                #  https://web3py.readthedocs.io/en/latest/filters.html#event-log-filters
                 event_filter = eval(function_string)
 
                 self.logger.info("For contract {} created event filter: {}:{}".format(
@@ -83,7 +85,11 @@ class EventScraper:
     def compose_filter_creation_execution_string(event_name, argument_filters):
         normalised_args = ""
         for argument, value in argument_filters.items():
-            normalised_args += '{}="{}", '.format(argument, value)
+            try:
+                extra = '{}={}, '.format(argument, int(value))
+            except ValueError:
+                extra = '{}="{}", '.format(argument, value)
+            normalised_args += extra
         normalised_args = normalised_args[:-2]
         function_string = "contract.events.{}.createFilter({})".format(event_name, normalised_args)
         return function_string
