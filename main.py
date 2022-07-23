@@ -1,8 +1,8 @@
 import os
 import json
 import asyncio
-from typing import List
 from web3.types import LogReceipt
+from web3.contract import LogFilter
 
 from web3environment import Web3Interface, Blockchains
 from utils import get_logger
@@ -62,7 +62,7 @@ class EventScraper:
 
             # this is actually used dynamically, do not delete, look down at the eval function
             contract = self.w3i.web3.eth.contract(address=address, abi=abi)
-
+            contract.events.PairCreation.createFilter()
             events_to_listen = contract_data['events_to_listen']
             for event_name, event_data in events_to_listen.items():
                 argument_filters = event_data['argument_filters']
@@ -94,7 +94,7 @@ class EventScraper:
             loop.close()
 
     @staticmethod
-    def compose_filter_creation_execution_string(event_name, argument_filters) -> str:
+    def compose_filter_creation_execution_string(event_name: str, argument_filters: dict) -> str:
         """
         Will combine the given parameters to form a python execution string for setting up a new filter.
         This will be removed, but for the purpose of this POC, it will stay and be properly documented.
@@ -120,7 +120,7 @@ class EventScraper:
         function_string = "contract.events.{}.createFilter({})".format(event_name, normalised_args)
         return function_string
 
-    async def filter_loop(self, event_filter, polling_interval, event_name, filter_arguments):
+    async def filter_loop(self, event_filter: LogFilter, polling_interval: int, event_name: str, filter_arguments: dict):
         """
         Entry point for the async functions. Passes arguments to handle_event function and polls polling_interval
         seconds for new events to pass
@@ -132,7 +132,7 @@ class EventScraper:
                 self.handle_event(event_data, filter_arguments, event_name)
             await asyncio.sleep(polling_interval)
 
-    def handle_event(self, event: List[LogReceipt], filter_arguments: dict, event_name: str):
+    def handle_event(self, event: LogReceipt, filter_arguments: dict, event_name: str):
         """
         Function handles the received event from the smart contract, the filter arguments used and the event name.
         Will group the data and publish it on the indicated RabbitMQ routing key
