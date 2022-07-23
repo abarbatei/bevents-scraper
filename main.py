@@ -48,22 +48,22 @@ class EventScraper:
                     blockchain, address))
             abi = contract_data['abi']
 
-            # this is actually used dynamically, do not delete
+            # this is actually used dynamically, do not delete, look down at the eval function
             contract = self.w3i.web3.eth.contract(address=address, abi=abi)
 
             events_to_listen = contract_data['events_to_listen']
             for event_name, event_data in events_to_listen.items():
                 argument_filters = event_data['argument_filters']
 
-                normalised_args = ""
-                for argument, value in argument_filters.items():
-                    normalised_args += '{}="{}", '.format(argument, value)
-                normalised_args = normalised_args[:-2]
-                function_string = "contract.events.{}.createFilter({})".format(event_name, normalised_args)
+                function_string = self.compose_filter_creation_execution_string(event_name, argument_filters)
+
+                # this is a hack and the use of eval in general code should be discouraged
+                # this also brings a very bad security risk if the passed argument can be controlled by a 3rd party
+                # in this case it is not, it is composed of the content in contract-watchlist.json which we control
                 event_filter = eval(function_string)
 
                 self.logger.info("For contract {} created event filter: {}:{}".format(
-                    address, event_name, normalised_args))
+                    address, event_name, argument_filters))
 
                 task = loop.create_task(self.filter_loop(event_filter,
                                                          self.POLLING_INTERVAL_SECONDS,
@@ -78,6 +78,15 @@ class EventScraper:
             )
         finally:
             loop.close()
+
+    @staticmethod
+    def compose_filter_creation_execution_string(event_name, argument_filters):
+        normalised_args = ""
+        for argument, value in argument_filters.items():
+            normalised_args += '{}="{}", '.format(argument, value)
+        normalised_args = normalised_args[:-2]
+        function_string = "contract.events.{}.createFilter({})".format(event_name, normalised_args)
+        return function_string
 
     async def filter_loop(self, event_filter, polling_interval, event_name, filter_arguments):
         self.logger.info("Starting asyncio filter routine {} {} with arguments: {}".format(
