@@ -17,7 +17,7 @@ The json has the following format:
       "events_to_listen": {
         "<event name>": {
           "argument_filters": {
-            "fromBlock": "latest" // curently only fromBlock: lastest is supported
+            "fromBlock": "latest" // curently only fromBlock/toBlock: integer/tag is supported
           }
         }
       }
@@ -145,3 +145,29 @@ An example:
 
 You can also see these messages directly in the RabbitMQ interface if management plugin is added.
 ![img](res/rabbitmq-ui.PNG)
+
+## Extending and testing
+
+Extending the code is straightforward, clone, set it up and develop.
+Testing is done using pytest, install development requirements for full required packages
+`pip install -r requirements-dev.txt`
+
+In order to run tests a subset of connections needs to be passed for object initialisations. 
+Required configs are same as for the initial but with testing in (e.g. a local server).
+
+Example start test script:
+```bat
+@echo off
+set RPC_ENDPOINT_HTTPS_URL=https://mainnet.infura.io/v3/<your_API_key>
+set RPC_ENDPOINT_WSS_URL=wss://mainnet.infura.io/ws/v3/<your_API_key>
+
+set RABBIT_HOST_URL=localhost
+set RABBIT_HOST_PORT=5672
+set RABBIT_EXCHANGE=events
+set RABBIT_ROUTING_KEY=events.all
+set RABBIT_USER=guest
+set RABBIT_PASSWORD=guest
+py.test
+```
+
+
