@@ -7,40 +7,29 @@ from web3.contract import LogFilter
 from web3environment import Web3Interface, Blockchains
 from utils import get_logger
 from distribution import RabbitPublisher
+import myweb3encoding
 
 
 class EventScraper:
 
     POLLING_INTERVAL_SECONDS = 1
-    INPUT_FILE_NAME = "contract-watchlist.json"
 
-    def __init__(self):
+    def __init__(self, contract_watchlist, rabbitmq_config, endpoint):
         self.logger = get_logger(self.__class__.__name__)
         self.w3i = Web3Interface(blockchain=Blockchains.ETHEREUM,
-                                 endpoint=os.environ['RPC_ENDPOINT_HTTPS_URL'])
-        self.targeted_events_data = self.load_events_filter()
+                                 endpoint=endpoint)
+        self.contract_watchlist = contract_watchlist
         self.logger.info("Loaded contract watchlist")
+
+        # this is needed to keep a strong reference on the coroutines so that the GC doesn't collect them.
+        # as per documentation indicated
         self.background_tasks = set()
-
-        config = {
-            "host": os.environ["RABBIT_HOST_URL"],
-            "port": int(os.environ["RABBIT_HOST_PORT"]),
-            "exchange": os.environ["RABBIT_EXCHANGE"],
-            "routing_key": os.environ["RABBIT_ROUTING_KEY"],
-            "user": os.environ["RABBIT_USER"],
-            "password": os.environ["RABBIT_PASSWORD"]
-        }
-
-        self.publisher = RabbitPublisher(config)
+        self.is_test_run = False
+        self.publisher = self.get_rabbit_connection(rabbitmq_config)
 
     @staticmethod
-    def load_events_filter() -> dict:
-        """
-        Reads the content of INPUT_FILE_NAME (json file) and returns it. Simple helper function
-        @return: the targeted contract events and filters
-        """
-        with open(EventScraper.INPUT_FILE_NAME, "rt") as fin:
-            return json.load(fin)
+    def get_rabbit_connection(rabbitmq_config):
+        return RabbitPublisher(rabbitmq_config)
 
     def setup_filters(self):
         """
@@ -52,7 +41,7 @@ class EventScraper:
         """
         loop = asyncio.get_event_loop()
 
-        for contract_data in self.targeted_events_data['contracts']:
+        for contract_data in self.contract_watchlist['contracts']:
             address = self.w3i.web3.toChecksumAddress(contract_data['address'])
             blockchain = contract_data['blockchain']
             if blockchain != self.w3i.blockchain:
@@ -62,7 +51,7 @@ class EventScraper:
 
             # this is actually used dynamically, do not delete, look down at the eval function
             contract = self.w3i.web3.eth.contract(address=address, abi=abi)
-            contract.events.PairCreation.createFilter()
+
             events_to_listen = contract_data['events_to_listen']
             for event_name, event_data in events_to_listen.items():
                 argument_filters = event_data['argument_filters']
@@ -130,6 +119,9 @@ class EventScraper:
         while True:
             for event_data in event_filter.get_new_entries():
                 self.handle_event(event_data, filter_arguments, event_name)
+                if self.is_test_run:
+                    # helper part for testing purpose
+                    return
             await asyncio.sleep(polling_interval)
 
     def handle_event(self, event: LogReceipt, filter_arguments: dict, event_name: str):
@@ -141,18 +133,46 @@ class EventScraper:
         @param event_name: the Event name
         @return: nothing, it publishes to the message broker new events
         """
-        data = {
-            "event_name": event_name,
-            "filter_arguments": filter_arguments,
-            "event_data": json.loads(self.w3i.web3.toJSON(event))
-        }
-        self.logger.info("Publishing event {} data to routing key".format(event_name))
-        self.publisher.publish(json.dumps(data))
-        self.logger.info("Done publishing event {} data to routing key".format(event_name))
+        try:
+            data = {
+                "event_name": event_name,
+                "filter_arguments": filter_arguments,
+                # TODO: do a pull request with the extension to web3.toJSON to support bytes then resume using it here
+                # "event_data": json.loads(self.w3i.web3.toJSON(event))
+                "event_data": json.loads(myweb3encoding.to_json(event))
+            }
+            self.logger.info("Publishing event {} data to routing key".format(event_name))
+            self.publisher.publish(json.dumps(data))
+            self.logger.info("Done publishing event {} data to routing key".format(event_name))
+        except Exception:
+            self.logger.exception("Unknown problem publishing event {}:{}".format(event_name, event))
+
+
+def load_events_filter() -> dict:
+    """
+    Reads the content of input_file_name (json file) and returns it. Simple helper function
+    @return: the targeted contract events and filters
+    """
+    input_file_name = os.path.join(os.path.dirname(os.path.abspath(__file__)), "contract-watchlist.json")
+    with open(input_file_name, "rt") as fin:
+        return json.load(fin)
 
 
 def main():
-    event_scraper = EventScraper()
+    endpoint = os.environ['RPC_ENDPOINT_HTTPS_URL']
+    rabbitmq_config = {
+        "host": os.environ["RABBIT_HOST_URL"],
+        "port": int(os.environ["RABBIT_HOST_PORT"]),
+        "exchange": os.environ["RABBIT_EXCHANGE"],
+        "routing_key": os.environ["RABBIT_ROUTING_KEY"],
+        "user": os.environ["RABBIT_USER"],
+        "password": os.environ["RABBIT_PASSWORD"]
+    }
+
+    contract_watchlist = load_events_filter()
+    event_scraper = EventScraper(contract_watchlist=contract_watchlist,
+                                 rabbitmq_config=rabbitmq_config,
+                                 endpoint=endpoint)
     event_scraper.setup_filters()
 
 
